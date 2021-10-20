@@ -1,0 +1,53 @@
+version: "3.9"
+services:
+  vault:
+    container_name: vault-frontend
+    image: "docker.io/library/vault:1.8.4"
+    cap_add:
+      - "IPC_LOCK"
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=AutomationSummit2021
+      # Typically something like s.23sdfj90hfh8234913402
+    networks:
+      vault-network:
+        ipv4_address: 172.42.0.42
+        aliases:
+          - vault-frontend
+
+  job:
+    container_name: job
+    build:
+      context: ./resources
+      dockerfile: vault-job.dockerfile
+    depends_on:
+      - vault
+    restart: "no"
+    cap_add:
+      - "IPC_LOCK"
+    command: ["until [[ $$(vault status -format=json | jq .sealed) == 'false' ]]; do sleep 2; done"]
+    environment:
+      - VAULT_TOKEN=AutomationSummit2021
+      - VAULT_ADDR=http://vault-frontend:8200
+    entrypoint: 
+      - "sh" 
+      - "-c"
+      - "vault auth enable userpass && \
+      vault write auth/userpass/users/coolcat \
+      password=lemon policies=secret && \
+      vault policy write secret /tmp/secret.hcl"
+    networks:
+      vault-network:
+        ipv4_address: 172.42.0.88
+        aliases:
+          - job
+
+networks:
+  vault-network:
+    ipam:
+      config:
+        - subnet: 172.42.0.0/24
+
+    
+    

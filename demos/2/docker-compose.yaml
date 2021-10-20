@@ -1,0 +1,86 @@
+version: "3.9"
+services:
+  vault:
+    container_name: vault-frontend
+    image: "docker.io/library/vault:1.8.4"
+    cap_add:
+      - "IPC_LOCK"
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=AutomationSummit2021
+    networks:
+      vault-network:
+        ipv4_address: 172.42.0.42
+        aliases:
+          - vault-frontend
+
+  job:
+    container_name: job
+    build:
+      context: ./resources
+      dockerfile: vault-job.dockerfile
+    depends_on:
+      - vault
+    restart: "no"
+    cap_add:
+      - "IPC_LOCK"
+    command: ["until [[ $$(vault status -format=json | jq .sealed) == 'false' ]]; do sleep 1; done"]
+    environment:
+      - VAULT_TOKEN=AutomationSummit2021
+      - VAULT_ADDR=http://vault-frontend:8200
+    entrypoint: 
+      - "sh" 
+      - "-c"
+      - "vault auth enable approle && \
+        vault policy write approle /tmp/approle.hcl && \
+        vault write auth/approle/role/jenkins \
+        secret_id_bound_cidrs=\"0.0.0.0/0\",\"127.0.0.1/32\" \
+        secret_id_ttl=60m \
+        secret_id_num_uses=5 \
+        enable_local_secret_ids=false \
+        token_bound_cidrs=\"0.0.0.0/0\",\"127.0.0.1/32\" \
+        token_num_uses=10 \
+        token_ttl=1h \
+        token_max_ttl=3h \
+        token_type=default \
+        period=\"\" \
+        policies=\"default\",\"approle\""
+    networks:
+      vault-network:
+        ipv4_address: 172.42.0.88
+        aliases:
+          - job
+
+  jenkins:
+    build:
+      context: ./resources
+      dockerfile: jenkins-server.dockerfile
+    privileged: true
+    user: root
+    environment:
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+      JENKINS_OPTS: --argumentsRealm.roles.user=admin --argumentsRealm.passwd.admin=AutomationSummit2021 --argumentsRealm.roles.admin=admin
+    ports:
+      - 8080:8080
+      - 50000:50000
+    volumes:
+      - ./jenkins:/var/jenkins_home
+    container_name: jenkins
+    depends_on:
+      - vault
+      - job
+    networks:
+      vault-network:
+        ipv4_address: 172.42.0.220
+        aliases:
+          - jenkins
+
+networks:
+  vault-network:
+    ipam:
+      config:
+        - subnet: 172.42.0.0/24
+
+    
+    
